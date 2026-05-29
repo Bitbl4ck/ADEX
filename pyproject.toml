@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adex"
+version = "0.1.0"
+description = "ADEX — Active Directory EXploitation: privilege escalation assessment tool"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Bitbl4ck" }]
+keywords = ["active-directory", "pentest", "security", "ldap", "kerberos"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+dependencies = [
+    "impacket>=0.12",
+    "ldap3>=2.9",
+    "certipy-ad>=4.8",
+    "rich>=13.0",
+    "jinja2>=3.1",
+    "pycryptodome>=3.19",
+    "cryptography>=42.0",
+    "dnspython>=2.4",
+    "argcomplete>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+adex = "adex.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Bitbl4ck/ADEX"
+Repository = "https://github.com/Bitbl4ck/ADEX"
+Issues = "https://github.com/Bitbl4ck/ADEX/issues"
+
+[tool.setuptools.packages.find]
+include = ["adex*"]
+
+[tool.setuptools.package-data]
+adex = ["templates/*.j2"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]  # line length handled elsewhere if needed
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

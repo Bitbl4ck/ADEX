@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ tool }} report</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --fg: #c9d1d9;
+    --muted: #8b949e;
+    --card: #161b22;
+    --border: #30363d;
+    --critical: #ff4d4f;
+    --high: #ff7a45;
+    --medium: #faad14;
+    --low: #69b1ff;
+    --info: #8b949e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
+         background: var(--bg); color: var(--fg); }
+  header { padding: 24px 32px; border-bottom: 1px solid var(--border); background: var(--card); }
+  header h1 { margin: 0; font-size: 22px; }
+  header .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  main { padding: 24px 32px; max-width: 1200px; margin: 0 auto; }
+  .summary { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+  .pill { padding: 8px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--card);
+          font-weight: 600; font-size: 13px; }
+  .pill.critical { color: var(--critical); border-color: var(--critical); }
+  .pill.high { color: var(--high); border-color: var(--high); }
+  .pill.medium { color: var(--medium); border-color: var(--medium); }
+  .pill.low { color: var(--low); border-color: var(--low); }
+  .pill.info { color: var(--info); }
+  .finding { background: var(--card); border: 1px solid var(--border); border-left-width: 4px;
+             border-radius: 6px; padding: 16px 20px; margin-bottom: 12px; }
+  .finding.critical { border-left-color: var(--critical); }
+  .finding.high { border-left-color: var(--high); }
+  .finding.medium { border-left-color: var(--medium); }
+  .finding.low { border-left-color: var(--low); }
+  .finding.info { border-left-color: var(--info); }
+  .finding h3 { margin: 0 0 6px 0; font-size: 16px; }
+  .finding .tags { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .finding .tags .sev { font-weight: 700; text-transform: uppercase; margin-right: 8px; }
+  .finding .desc { margin: 8px 0; }
+  .finding details { margin-top: 8px; }
+  .finding summary { cursor: pointer; color: var(--muted); }
+  .finding pre { background: #0a0e13; padding: 12px; border-radius: 4px; overflow-x: auto;
+                 font-size: 12px; color: var(--fg); }
+  .finding ul { margin: 4px 0 0 20px; padding: 0; color: var(--muted); font-size: 12px; }
+  .recipe { background: #0a0e13; border-radius: 4px; padding: 12px; margin-top: 8px;
+            border: 1px solid var(--border); }
+  .recipe h4 { margin: 0 0 8px 0; font-size: 12px; color: var(--high);
+               text-transform: uppercase; letter-spacing: 0.05em; }
+  .recipe pre { margin: 0; font-size: 12px; line-height: 1.4; }
+  .chain-path { background: #0a0e13; border-radius: 4px; padding: 12px;
+                font-family: ui-monospace, monospace; font-size: 12px; margin: 8px 0;
+                white-space: pre-wrap; word-break: break-word; border: 1px solid var(--border); }
+  .domain-tag { background: rgba(105,177,255,0.1); color: var(--low);
+                padding: 2px 8px; border-radius: 999px; font-size: 11px; margin-right: 6px; }
+  footer { padding: 16px 32px; border-top: 1px solid var(--border); color: var(--muted);
+           font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ADEX Report <span style="font-size:13px;color:var(--muted);font-weight:400">— Active Directory EXploitation</span></h1>
+  <div class="meta">{{ tool }} {{ version }} &middot; generated {{ generated }} &middot; {{ total }} findings</div>
+</header>
+<main>
+  <div class="summary">
+    {% for sev in ["CRITICAL","HIGH","MEDIUM","LOW","INFO"] %}
+      <div class="pill {{ sev|lower }}">{{ counts[sev] }} {{ sev }}</div>
+    {% endfor %}
+  </div>
+
+  {% if findings %}
+    {% for f in findings %}
+      <div class="finding {{ f.severity|lower }}">
+        <div class="tags">
+          <span class="sev">{{ f.severity }}</span>
+          {% if f.domain_context %}<span class="domain-tag">{{ f.domain_context }}</span>{% endif %}
+          <span>{{ f.module }}</span>
+          {% if f.target %}<span>&middot; {{ f.target }}</span>{% endif %}
+        </div>
+        <h3>{{ f.title }}</h3>
+        {% if f.description %}<div class="desc">{{ f.description }}</div>{% endif %}
+        {% if f.module == "chain" and f.evidence and f.evidence.render %}
+          <div class="chain-path">{{ f.evidence.render }}</div>
+        {% endif %}
+        {% if f.recipe %}
+          <div class="recipe">
+            <h4>Recipe — paste-ready</h4>
+            <pre>{% for line in f.recipe %}{{ line }}
+{% endfor %}</pre>
+          </div>
+        {% endif %}
+        {% if f.evidence %}
+          <details>
+            <summary>Evidence</summary>
+            <pre>{{ f.evidence | tojson(indent=2) }}</pre>
+          </details>
+        {% endif %}
+        {% if f.references %}
+          <ul>
+            {% for ref in f.references %}<li>{{ ref }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <p>No findings.</p>
+  {% endif %}
+</main>
+<footer>adex {{ version }}</footer>
+</body>
+</html>

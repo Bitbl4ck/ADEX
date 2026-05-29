@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtualenvs
+.venv/
+venv/
+ENV/
+env/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ADEX outputs / sensitive artifacts
+*.pfx
+*.p12
+*.ccache
+*.kirbi
+*.keytab
+*.pem
+*.key
+report.json
+report.html
+report.txt
+delta.json
+delta.html
+delta.txt
+hashes.txt
+*.ntds
+loot/
