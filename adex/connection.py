@@ -174,7 +174,36 @@ def connect_ldap(auth: Auth, dc: str | None = None, use_ldaps: bool = False,
         except LDAPException as e:
             raise ConnectionError(f"LDAP bind failed: {e}") from e
 
-    base_dn = ""
-    if server.info and server.info.naming_contexts:
-        base_dn = str(server.info.naming_contexts[0])
-    return BoundLDAP(conn=conn, server=server, base_dn=base_dn, use_ldaps=use_ldaps or method == "schannel")
+    base_dn = _resolve_default_naming_context(server)
+    return BoundLDAP(conn=conn, server=server, base_dn=base_dn,
+                     use_ldaps=use_ldaps or method == "schannel")
+
+
+def _resolve_default_naming_context(server: Server) -> str:
+    """Pick the domain partition the DC belongs to.
+
+    Pitfall: `server.info.naming_contexts[0]` is whichever NC the DC chose
+    to list first, which on a child-domain DC (e.g. winterfell in GOAD)
+    is often `CN=Configuration,...` — wrong for any module that searches
+    relative to the domain root. The right field is `defaultNamingContext`
+    from rootDSE; we fall back to filtering naming_contexts only if that's
+    unavailable.
+    """
+    if not server.info:
+        return ""
+    other = server.info.other or {}
+    for key in ("defaultNamingContext", "default_naming_context"):
+        val = other.get(key)
+        if val:
+            return val[0] if isinstance(val, (list, tuple)) else str(val)
+    if server.info.naming_contexts:
+        for nc in server.info.naming_contexts:
+            nc_str = str(nc)
+            up = nc_str.upper()
+            if (up.startswith("DC=") and "CN=CONFIGURATION" not in up
+                    and "CN=SCHEMA" not in up
+                    and not up.startswith("DC=DOMAINDNSZONES")
+                    and not up.startswith("DC=FORESTDNSZONES")):
+                return nc_str
+        return str(server.info.naming_contexts[0])
+    return ""

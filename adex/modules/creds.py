@@ -186,23 +186,36 @@ class CredsModule(ModuleBase):
     # ---- LAPS ----
 
     def _laps(self, ctx: RunContext) -> list[Finding]:
+        """Probe for readable LAPS passwords. Domains that haven't deployed
+        Windows LAPS won't have `msLAPS-Password` in schema and the older
+        `ms-Mcs-AdmPwd` attribute may also be absent. We try each separately
+        and ignore the schema-missing error so one missing attribute doesn't
+        kill the whole module."""
+        from ldap3.core.exceptions import LDAPAttributeError
+
         SAMPLE = 10
-        ctx.conn.search(
-            ctx.base_dn,
-            "(&(objectClass=computer)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
-            search_scope=SUBTREE,
-            attributes=["sAMAccountName", "ms-Mcs-AdmPwd", "msLAPS-Password"],
-            paged_size=SAMPLE,
-        )
         username, password, nt_hash = self._attacker(ctx)
-        readable = []
-        for e in ctx.conn.entries[:SAMPLE]:
-            sam = str(e["sAMAccountName"])
-            for attr in ("ms-Mcs-AdmPwd", "msLAPS-Password"):
+        readable: list[tuple[str, str]] = []
+        flt = "(&(objectClass=computer)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+        for attr in ("ms-Mcs-AdmPwd", "msLAPS-Password"):
+            try:
+                ctx.conn.search(
+                    ctx.base_dn, flt,
+                    search_scope=SUBTREE,
+                    attributes=["sAMAccountName", attr],
+                    paged_size=SAMPLE,
+                )
+            except LDAPAttributeError:
+                ctx.log.debug("[creds] LAPS attribute %s not in schema — skipping", attr)
+                continue
+            except Exception as e:
+                ctx.log.debug("[creds] LAPS probe %s failed: %s", attr, e)
+                continue
+            for e in ctx.conn.entries[:SAMPLE]:
+                sam = str(e["sAMAccountName"])
                 try:
                     if e[attr] and e[attr].value:
                         readable.append((sam, attr))
-                        break
                 except Exception:
                     continue
         out: list[Finding] = []
