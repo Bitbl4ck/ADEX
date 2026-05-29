@@ -161,7 +161,7 @@ The delta files highlight what's new and what's resolved — useful both for re-
 | `creds`       | impl   | Kerberoastable / AS-REP roastable users, gMSA, LAPS readability               |
 | `rights`      | impl   | DCSync, dangerous ACEs on AdminSDHolder + privileged groups + protected users |
 | `delegation`  | impl   | Unconstrained, constrained (with protocol-transition), RBCD inbound + writable |
-| `adcs`        | impl   | ESC1 (vulnerable templates), ESC8 (HTTP enrollment relay)                     |
+| `adcs`        | impl   | ESC1-9, 11, 13, 15 — vulnerable templates, CA ACLs, HTTP/RPC relay, OID-to-group, EKUwu, no-security-extension |
 | `accounts`    | stub   | Privileged users, adminCount, SID history, stale accounts                     |
 | `gpo`         | stub   | GPO write access, local group membership via GPO                              |
 | `computer`    | stub   | LAPS coverage, outdated OS, infrastructure servers                             |
@@ -192,15 +192,14 @@ This makes ADEX scriptable in CI-style "is this domain still drift-free?" checks
 
 - It does not exploit. The `enum` flow is read-only against LDAP. The standalone offensive subcommands (`kerberoast`, `asreproast`, `shadow-creds`, `rbcd`) are stubs in v0.2; they ship in Phase 3.
 - It does not replace BloodHound for path visualisation — for interactive graph queries on huge directories, BloodHound is still the right tool.
-- It does not replace certipy for ADCS deep-dives — Phase 2 covers ESC1 + ESC8; Phase 2.5 (in progress) extends this to ESC1-11 + ESC13/15.
+- It does not replace certipy for ADCS deep-dives — but it covers most of `certipy find` from a single LDAP bind: ESC1, 2, 3, 4, 5, 7, 8, 9, 11, 13, and 15. ESC6 needs an RPC bind to the CA's CertSrv; ADEX flags the CA for verification with certipy. ESC10 is registry-only on the DC.
 - It does not authenticate to anything other than the directory you point it at. No telemetry, no upload, no cloud component.
 
 ---
 
 ## Roadmap
 
-- **Phase 2.5 (in progress)** — comprehensive ADCS coverage (ESC1-11 + ESC13/15), parity with `certipy find`.
-- **Phase 3** — standalone offensive commands (Kerberoast, ASREP, Shadow Credentials, RBCD) executable from the same CLI.
+- **Phase 3 (next)** — standalone offensive commands (Kerberoast, ASREP, Shadow Credentials, RBCD) executable from the same CLI.
 - **Phase 3+** — `accounts`, `gpo`, `computer`, `application` modules.
 - **Later** — BloodHound JSON ingest/export so the graphs play together.
 
