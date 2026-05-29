@@ -120,12 +120,25 @@ def fetch_security_descriptor(conn: Connection, dn: str) -> bytes | None:
 # ---- ACE analysis ----
 
 def ace_object_guid(ace) -> str | None:
-    """Return the ObjectType GUID of an object-specific ACE, normalised."""
+    """Return the ObjectType GUID of an object-specific ACE, normalised.
+
+    impacket Structure subclasses don't expose `.get()` — they raise KeyError
+    if a conditional field (ObjectType is conditional on Flags & 0x01) wasn't
+    parsed. We use [] + try/except instead.
+    """
     if not isinstance(ace, ACCESS_ALLOWED_OBJECT_ACE):
         return None
-    flags = ace["Flags"]
-    obj = ace.get("ObjectType")
-    if not flags or not obj:
+    try:
+        flags = ace["Flags"]
+    except (KeyError, IndexError):
+        return None
+    if not (flags & 0x01):  # ACE_OBJECT_TYPE_PRESENT
+        return None
+    try:
+        obj = ace["ObjectType"]
+    except (KeyError, IndexError):
+        return None
+    if not obj:
         return None
     return _norm_guid(obj)
 

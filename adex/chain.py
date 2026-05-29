@@ -24,6 +24,16 @@ TAKEOVER_EDGES = {
     "OwnsCert", "GMSAReadable",
 }
 
+# Edge types that grant authentication-as-anyone — once you have the
+# capability you can mint a cert / TGT for any user. The chain analyzer
+# auto-wires these to every sink (DA, EA, krbtgt, DCs, AdminSDHolder)
+# at zero cost so the BFS finds an ESC1-template-or-DCSync path that
+# actually lands on a privileged group.
+ANY_USER_WIN_EDGES = {
+    "ESC1", "ESC2", "ESC3", "ESC5", "ESC8", "ESC9",
+    "ESC11", "ESC13", "ESC15", "DCSync",
+}
+
 
 def resolve_sinks(conn: Connection, base_dn: str) -> dict[str, str]:
     """Return {sid_or_dn: human_label} for high-value targets in this domain."""
@@ -105,13 +115,24 @@ def collect_recipes(path: list[Edge]) -> list[str]:
 def compute_chains(edges: Iterable[Edge], sources: set[str],
                    sinks: dict[str, str],
                    max_depth: int = 6, top_k: int = 5) -> tuple[Graph, list[Finding]]:
+    edges = list(edges)
     g = Graph()
     g.add_edges(edges)
     # Set labels for sinks so paths print nicely
     for node, label in sinks.items():
         g.labels.setdefault(node, label)
 
-    paths = g.find_paths(sources, sinks.keys(), max_depth=max_depth,
+    # Auto-wire "win" edges (ESC*, DCSync) to every sink so BFS doesn't
+    # dead-end at synthetic ESC nodes. Cost 0 so the path length reflects
+    # only the real attack hops.
+    win_dsts = {e.dst for e in edges if e.type in ANY_USER_WIN_EDGES}
+    for src_node in win_dsts:
+        for sink_node, sink_label in sinks.items():
+            g.add_edge(Edge(src=src_node, dst=sink_node,
+                            type="AddMember",  # any takeover edge is fine
+                            dst_label=sink_label, cost=0))
+
+    paths = g.find_paths(sources, sinks.keys(), max_depth=max_depth + 1,
                          max_paths_per_pair=1)
     paths = paths[:top_k]
 

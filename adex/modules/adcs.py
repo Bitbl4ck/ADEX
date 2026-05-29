@@ -651,9 +651,16 @@ class AdcsModule(ModuleBase):
             mask = a["Mask"]["Mask"]
             if mask & GENERIC_ALL:
                 return True
-            if isinstance(ace, ACCESS_ALLOWED_OBJECT_ACE) or ace["AceType"] in (0x05, 0x07):
+            if isinstance(a, ACCESS_ALLOWED_OBJECT_ACE) or ace["AceType"] in (0x05, 0x07):
                 if mask & 0x00000100:  # CONTROL_ACCESS
-                    obj = a.get("ObjectType")
+                    try:
+                        flags = a["Flags"]
+                        if flags & 0x01:  # ACE_OBJECT_TYPE_PRESENT
+                            obj = a["ObjectType"]
+                        else:
+                            obj = None
+                    except (KeyError, IndexError):
+                        obj = None
                     if obj:
                         guid = (obj.hex().lower() if isinstance(obj, bytes)
                                 else str(obj).lower()).replace("-", "")
