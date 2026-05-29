@@ -44,9 +44,11 @@ def test_rbcd_write_chain():
     assert "impacket-addcomputer" in full
     assert "bloodyAD" in full
     assert "impacket-getST" in full
-    # SPN must drop the trailing '$' from the target
-    assert "cifs/TARGET.corp.local" in full
-    assert "cifs/TARGET$" not in full
+    # SPN must drop the trailing '$' from the target. Recipe uses host/ as
+    # the default since it's universally registered on domain-joined computers
+    # and addcomputer-created accounts (cifs/ may be missing on those).
+    assert "host/TARGET.corp.local" in full
+    assert "host/TARGET$" not in full
     # KRB5CCNAME hygiene: unset before getST, inline KRB5CCNAME for secretsdump
     assert "unset KRB5CCNAME" in full
     assert "export KRB5CCNAME" not in full
