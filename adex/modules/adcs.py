@@ -649,7 +649,8 @@ class AdcsModule(ModuleBase):
             if sid not in principal_sids:
                 continue
             mask = a["Mask"]["Mask"]
-            if mask & GENERIC_ALL:
+            from adex.utils import grants_full_control
+            if grants_full_control(mask):
                 return True
             if isinstance(a, ACCESS_ALLOWED_OBJECT_ACE) or ace["AceType"] in (0x05, 0x07):
                 if mask & 0x00000100:  # CONTROL_ACCESS
@@ -683,15 +684,17 @@ class AdcsModule(ModuleBase):
             return []
         if not sd["Dacl"]:
             return []
+        from adex.utils import is_dangerous_write_mask
         out: list[tuple[str, int]] = []
         for ace in sd["Dacl"].aces:
             a = ace["Ace"]
             sid = format_sid(a["Sid"].getData())
             if sid not in principal_sids:
                 continue
-            mask = a["Mask"]["Mask"] & DANGEROUS_WRITE
-            if mask:
-                out.append((sid, mask))
+            full_mask = a["Mask"]["Mask"]
+            write_bits = is_dangerous_write_mask(full_mask)
+            if write_bits:
+                out.append((sid, write_bits))
         return out
 
 

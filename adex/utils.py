@@ -40,17 +40,92 @@ FUNC_LEVEL = {
 
 
 # ---- Access masks (DS rights) ----
-GENERIC_ALL = 0x000F01FF
-GENERIC_WRITE = 0x00020028
-GENERIC_READ = 0x00020094
-WRITE_DACL = 0x00040000
-WRITE_OWNER = 0x00080000
-WRITE_PROPERTY = 0x00000020
-SELF = 0x00000008
-CONTROL_ACCESS = 0x00000100  # extended-right
-CREATE_CHILD = 0x00000001
+# Specific AD object rights (low byte + extended)
+ADS_CREATE_CHILD     = 0x00000001
+ADS_DELETE_CHILD     = 0x00000002
+ADS_LIST_CONTENTS    = 0x00000004
+ADS_SELF             = 0x00000008
+ADS_READ_PROP        = 0x00000010
+ADS_WRITE_PROP       = 0x00000020
+ADS_DELETE_TREE      = 0x00000040
+ADS_LIST_OBJECT      = 0x00000080
+ADS_CONTROL_ACCESS   = 0x00000100   # extended-right (validated read or specific control)
 
-DANGEROUS_WRITE_RIGHTS = GENERIC_ALL | GENERIC_WRITE | WRITE_DACL | WRITE_OWNER
+# Standard rights
+DELETE               = 0x00010000
+READ_CONTROL         = 0x00020000
+WRITE_DACL           = 0x00040000
+WRITE_OWNER          = 0x00080000
+SYNCHRONIZE          = 0x00100000
+
+# Generic flag bits — these are templates that the kernel maps to specific
+# rights when the SD is built; in committed ACLs they sometimes appear raw.
+GENERIC_READ_BIT     = 0x80000000
+GENERIC_WRITE_BIT    = 0x40000000
+GENERIC_EXECUTE_BIT  = 0x20000000
+GENERIC_ALL_BIT      = 0x10000000
+
+# "Full Control" expressed as a fully-expanded specific bitmask. This is the
+# value some tools commit directly into ACEs when the user picked "Full
+# Control" in the GUI. NOTE: it includes read bits — testing for any overlap
+# is wrong (every read-only ACE matches). Only treat as Full Control when
+# the WHOLE bitmask is set together: (mask & GENERIC_ALL_BITPATTERN) == GENERIC_ALL_BITPATTERN.
+GENERIC_ALL_BITPATTERN = 0x000F01FF
+
+# Backwards-compat aliases used by older code paths.
+GENERIC_ALL = GENERIC_ALL_BITPATTERN
+WRITE_PROPERTY = ADS_WRITE_PROP
+SELF = ADS_SELF
+CONTROL_ACCESS = ADS_CONTROL_ACCESS
+CREATE_CHILD = ADS_CREATE_CHILD
+
+# Bits that grant a meaningful write / takeover capability on an AD object.
+# Pure-read and CONTROL_ACCESS-only ACEs are intentionally excluded; CONTROL_ACCESS
+# requires checking the ObjectType GUID separately.
+DANGEROUS_WRITE_BITS = (
+    ADS_CREATE_CHILD
+    | ADS_DELETE_CHILD
+    | ADS_DELETE_TREE
+    | ADS_SELF
+    | ADS_WRITE_PROP
+    | DELETE
+    | WRITE_DACL
+    | WRITE_OWNER
+)
+
+# Kept for back-compat with code that imports this name. Semantically still a
+# "set of dangerous bits" but callers should prefer is_dangerous_write_mask().
+DANGEROUS_WRITE_RIGHTS = DANGEROUS_WRITE_BITS
+
+
+def is_dangerous_write_mask(mask: int) -> int:
+    """Return the *dangerous-write* bits set in `mask`, or 0 if none.
+
+    Three ways an ACE counts as "dangerous":
+
+    1. The full-control specific bitpattern is set together (Full Control
+       was committed as a single ACE rather than a flag).
+    2. The high generic GA / GW flag is set (rare in committed ACLs but
+       possible).
+    3. One of the specific write bits in DANGEROUS_WRITE_BITS is set.
+
+    Critically: a mask with *only* read or list bits — including the very
+    common 0x20094 "Authenticated Users read everything" ACE — returns 0.
+    """
+    if (mask & GENERIC_ALL_BITPATTERN) == GENERIC_ALL_BITPATTERN:
+        return mask & GENERIC_ALL_BITPATTERN
+    high = mask & (GENERIC_ALL_BIT | GENERIC_WRITE_BIT)
+    if high:
+        return high
+    return mask & DANGEROUS_WRITE_BITS
+
+
+def grants_full_control(mask: int) -> bool:
+    """True if the mask grants Full Control (as a single bitpattern or via
+    the high GENERIC_ALL flag)."""
+    if (mask & GENERIC_ALL_BITPATTERN) == GENERIC_ALL_BITPATTERN:
+        return True
+    return bool(mask & GENERIC_ALL_BIT)
 
 
 # ---- Extended-rights / attribute GUIDs ----
@@ -75,11 +150,20 @@ def _norm_guid(g: str | bytes) -> str:
 # ---- LDAP search helpers ----
 
 def get_principal_sids(conn: Connection, base_dn: str, sam_account: str | None) -> set[str]:
-    """Return the SID set for the bound principal: their own SID + tokenGroups
-    (transitive group memberships) + a few well-knowns."""
-    sids: set[str] = {WELL_KNOWN["EVERYONE"], WELL_KNOWN["AUTHENTICATED_USERS"], WELL_KNOWN["USERS"]}
+    """Return the SID set for the bound principal: their own SID plus
+    `tokenGroups` (transitive group memberships).
+
+    `tokenGroups` already includes the user's well-known group memberships
+    (Authenticated Users, Everyone, Domain Users, Pre-W2K Compat, etc. as
+    applicable), so we don't hand-add any well-knowns here. Hand-adding
+    `Authenticated Users` blindly causes false positives on every ACE that
+    grants `Authenticated Users` something — the most common ACE type in AD.
+    """
+    sids: set[str] = set()
     if not sam_account:
-        return sids
+        # Schannel / cert binds: tokenGroups isn't reachable. Fall back to
+        # 'Authenticated Users' only — at least we know we authenticated.
+        return {WELL_KNOWN["AUTHENTICATED_USERS"], WELL_KNOWN["EVERYONE"]}
     conn.search(
         base_dn,
         f"(sAMAccountName={sam_account})",
@@ -101,6 +185,10 @@ def get_principal_sids(conn: Connection, base_dn: str, sam_account: str | None) 
         sids.add(str(e["objectSid"]))
     for raw in e["tokenGroups"].raw_values or []:
         sids.add(format_sid(raw))
+    # tokenGroups sometimes omits Everyone (S-1-1-0) on locked-down DCs.
+    # Authenticated Users is reliably included; Everyone is conservative.
+    sids.add(WELL_KNOWN["AUTHENTICATED_USERS"])
+    sids.add(WELL_KNOWN["EVERYONE"])
     return sids
 
 
@@ -156,41 +244,52 @@ def ace_grants_any(
     rights_mask: int,
     object_guid: str | None = None,
 ) -> tuple[bool, int]:
-    """Return (granted, mask) — granted is True if this ACE grants the principal
-    any bit of `rights_mask`. If `object_guid` is given, the ACE must either be
-    a non-object ACE or target that GUID."""
+    """Legacy: kept for back-compat. Prefer find_dangerous_aces directly."""
     a = ace["Ace"]
     sid = format_sid(a["Sid"].getData())
     if sid not in principal_sids:
         return False, 0
-    mask = a["Mask"]["Mask"] & rights_mask
-    if not mask:
+    full_mask = a["Mask"]["Mask"]
+    write_bits = is_dangerous_write_mask(full_mask) & rights_mask
+    if not write_bits:
         return False, 0
     if object_guid:
         guid = ace_object_guid(a)
-        # If ACE is not object-specific (no GUID), it applies to all attributes/rights
         if guid and guid != _norm_guid(object_guid):
             return False, 0
-    return True, mask
+    return True, write_bits
 
 
 def find_dangerous_aces(
     sd_bytes: bytes,
     principal_sids: set[str],
-    rights_mask: int = DANGEROUS_WRITE_RIGHTS,
+    rights_mask: int | None = None,  # ignored; kept for back-compat
     object_guid: str | None = None,
 ) -> list[dict]:
-    """Return a list of {sid, mask, guid} for ACEs in `sd_bytes` that grant the
-    principal any of `rights_mask` (optionally filtered to `object_guid`)."""
+    """Return ACEs that grant the principal a meaningful write capability.
+
+    Read-only ACEs (the very common 'Authenticated Users can read DA' kind)
+    are filtered out. CONTROL_ACCESS-only ACEs are filtered out unless their
+    ObjectType matches `object_guid` — extended rights without a known GUID
+    are not "dangerous writes".
+    """
     out: list[dict] = []
     for ace in iter_aces(sd_bytes):
-        granted, mask = ace_grants_any(ace, principal_sids, rights_mask, object_guid)
-        if not granted:
-            continue
         a = ace["Ace"]
+        sid = format_sid(a["Sid"].getData())
+        if sid not in principal_sids:
+            continue
+        full_mask = a["Mask"]["Mask"]
+        write_bits = is_dangerous_write_mask(full_mask)
+        if not write_bits:
+            continue
+        if object_guid:
+            guid = ace_object_guid(a)
+            if guid and guid != _norm_guid(object_guid):
+                continue
         out.append({
-            "sid": format_sid(a["Sid"].getData()),
-            "mask": mask,
+            "sid": sid,
+            "mask": write_bits,
             "guid": ace_object_guid(a),
         })
     return out
@@ -201,19 +300,26 @@ def find_extended_rights(
     principal_sids: set[str],
     right_guids: Iterable[str],
 ) -> list[dict]:
-    """Find ACEs granting CONTROL_ACCESS for any of the specified extended-right GUIDs."""
+    """Find ACEs granting CONTROL_ACCESS for any of the specified extended-right
+    GUIDs. Full Control on the object implicitly grants every extended right.
+
+    Filters by `principal_sids` in BOTH branches — never lists ACEs whose SID
+    isn't part of the bound principal's effective set.
+    """
     wanted = {_norm_guid(g): g for g in right_guids}
     out: list[dict] = []
     for ace in iter_aces(sd_bytes):
         a = ace["Ace"]
         sid = format_sid(a["Sid"].getData())
-        # GenericAll on the object grants every extended right too
+        if sid not in principal_sids:
+            continue
         full_mask = a["Mask"]["Mask"]
-        if full_mask & GENERIC_ALL:
+        # Full Control on the object grants every extended right too.
+        if grants_full_control(full_mask):
             for _normed, original in wanted.items():
                 out.append({"sid": sid, "right": original, "via": "GenericAll"})
             continue
-        if not (full_mask & CONTROL_ACCESS):
+        if not (full_mask & ADS_CONTROL_ACCESS):
             continue
         guid = ace_object_guid(a)
         if guid and guid in wanted:
