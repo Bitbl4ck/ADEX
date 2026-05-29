@@ -104,10 +104,15 @@ class DelegationModule(ModuleBase):
                 target=e.entry_dn,
                 evidence={"sAMAccountName": sam, "spns": spns,
                           "protocolTransition": protocol_transition},
+                # Don't pass ctx.auth.nt_hash here — that's the bound user's
+                # hash (e.g. hodor's), but constrained-delegation S4U needs
+                # the SPN'd account's own creds. Leave hash=None so the recipe
+                # explicitly tells the operator to obtain `sam`'s creds first
+                # (Kerberoast is the usual prerequisite step).
                 recipe=recipes.constrained_s4u(sam, spns[0] if spns else "<spn>",
                                                "Administrator",
                                                ctx.auth.domain, ctx.dc,
-                                               ctx.auth.nt_hash),
+                                               nt_hash=None),
                 edges=[Edge(src=ctx.me_node, dst=sid or e.entry_dn,
                             type="ConstrainedDelegation", dst_label=sam, cost=2)]
                       if sid and protocol_transition else [],

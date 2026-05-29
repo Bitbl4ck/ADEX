@@ -44,6 +44,22 @@ def test_rbcd_write_chain():
     assert "impacket-addcomputer" in full
     assert "bloodyAD" in full
     assert "impacket-getST" in full
+    # SPN must drop the trailing '$' from the target
+    assert "cifs/TARGET.corp.local" in full
+    assert "cifs/TARGET$" not in full
+    # KRB5CCNAME hygiene: unset before getST, inline KRB5CCNAME for secretsdump
+    assert "unset KRB5CCNAME" in full
+    assert "export KRB5CCNAME" not in full
+    assert "KRB5CCNAME=Administrator.ccache impacket-secretsdump" in full
+
+
+def test_constrained_s4u_recipe_warns_about_creds():
+    out = recipes.constrained_s4u("svc_user", "cifs/host", "Administrator",
+                                  "corp.local", "1.2.3.4", nt_hash=None)
+    full = "\n".join(out)
+    assert "Kerberoastable" in full or "credentials" in full.lower()
+    assert "unset KRB5CCNAME" in full
+    assert "<PASSWORD-OR-CRACK-VIA-KERBEROAST>" in full
 
 
 def test_unconstrained_includes_petitpotam():
